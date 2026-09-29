@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RollSafe — Anomaly & Rollback Monitor</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --green: #238636;
+            --red: #da3633;
+            --amber: #d29922;
+            --blue: #58a6ff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 30px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge {
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-healthy { background: rgba(35, 134, 54, 0.2); color: #3fb950; border: 1px solid #238636; }
+        .badge-degraded { background: rgba(210, 153, 34, 0.2); color: #d29922; border: 1px solid #d29922; }
+        .badge-rolledback { background: rgba(218, 54, 51, 0.2); color: #f85149; border: 1px solid #da3633; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .card-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .progress-bar {
+            height: 12px;
+            background: var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            display: flex;
+            margin-top: 15px;
+        }
+
+        .progress-stable {
+            background: var(--green);
+            transition: width 0.4s ease;
+        }
+
+        .progress-canary {
+            background: var(--blue);
+            transition: width 0.4s ease;
+        }
+
+        .log-box {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            font-size: 13px;
+            height: 220px;
+            overflow-y: auto;
+        }
+
+        .log-line {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+        }
+
+        .log-warn { color: var(--amber); }
+        .log-error { color: var(--red); }
+        .log-success { color: var(--green); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">
+            <span>🛡️ RollSafe Telemetry Station</span>
+        </div>
+        <div id="status-badge" class="badge badge-healthy">Canary Active (90% / 10%)</div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-label">Traffic Split</div>
+            <div class="card-value" id="traffic-split">90% v1 / 10% v2</div>
+            <div class="progress-bar">
+                <div id="bar-stable" class="progress-stable" style="width: 90%;"></div>
+                <div id="bar-canary" class="progress-canary" style="width: 10%;"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Canary Error Rate</div>
+            <div class="card-value" id="error-rate">0.0%</div>
+            <small style="color: var(--text-muted);">Threshold: 5.0% (Rollback Limit)</small>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Flapping Anomaly Counter</div>
+            <div class="card-value" id="flapping-counter">0 / 3</div>
+            <small style="color: var(--text-muted);">Consecutive Failures Required</small>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-label">Real-time SRE Audit Logs</div>
+        <div class="log-box" id="log-box">
+            <div class="log-line log-success">[INIT] RollSafe Gateway initialized with weighted round-robin distribution.</div>
+            <div class="log-line log-success">[MONITOR] Sampling probe connected to app-canary:8080. Steady-state confirmed.</div>
+        </div>
+    </div>
+
+    <script>
+        function appendLog(msg, type = "info") {
+            const box = document.getElementById("log-box");
+            const line = document.createElement("div");
+            line.className = `log-line log-${type}`;
+            const time = new Date().toLocaleTimeString();
+            line.textContent = `[${time}] ${msg}`;
+            box.prepend(line);
+        }
+
+        // Periodic simulation update (reads real status in production)
+        setInterval(async () => {
+            try {
+                const res = await fetch("/status.json");
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.rolled_back) {
+                        document.getElementById("status-badge").className = "badge badge-rolledback";
+                        document.getElementById("status-badge").textContent = "EMERGENCY ROLLED BACK (100% STABLE)";
+                        document.getElementById("traffic-split").textContent = "100% v1 / 0% v2";
+                        document.getElementById("bar-stable").style.width = "100%";
+                        document.getElementById("bar-canary").style.width = "0%";
+                    }
+                    if (data.metrics) {
+                        document.getElementById("error-rate").textContent = (data.metrics.error_rate * 100).toFixed(1) + "%";
+                        document.getElementById("flapping-counter").textContent = `${data.consecutive_failures} / ${data.threshold_required}`;
+                    }
+                }
+            } catch (e) {
+                // local polling fallback
+            }
+        }, 1500);
+    </script>
+</body>
+</html>
