@@ -94,65 +94,73 @@ We deliberately built RollSafe with a **Dual-Engine Architecture** to address bo
 
 ---
 
-## 4. Quickstart: 2-Minute Local Demo
+## 4. Quickstart: How to Run & Demo RollSafe
 
-You can run and test the complete system locally with Docker Desktop.
-
-### Step 1: Clone and Launch
-```bash
-git clone https://github.com/shourya2101/RollSafe.git
-cd RollSafe/deploy
-
-docker compose up -d
-```
-
-Verify all 4 containers are running:
-```bash
-docker compose ps
-```
-- `gateway`: Listening on `http://localhost:8080`
-- `app-stable`: Serving version `v1.0.0`
-- `app-canary`: Serving version `v2.0.0`
-- `controller`: Running background telemetry checks
+We built RollSafe so that anyone—judges, evaluators, or students—can run and test the complete system in seconds. Choose either the **Zero-Dependency Python Runner** or the **Containerized Docker Stack**.
 
 ---
 
-### Step 2: Open the Telemetry Station
-Open your web browser and navigate to:
+### Method A: Instant 10-Second Run (Zero Dependencies — Just Python)
+*No Docker or Kubernetes installation required. Runs directly on your machine using standard Python 3.*
+
+#### 1. Start the Complete SRE Stack
+Open a terminal in the project root:
+```bash
+python deploy/run_local_demo.py
+```
+This automatically boots:
+- The **Stable Microservice** (v1.0.0) on `:8081`
+- The **Canary Microservice** (v2.0.0) on `:8082`
+- The **Reverse Proxy Gateway** and **Telemetry Dashboard** on `:8080`
+- The **Background Anomaly Controller** with automated tripping logic
+
+#### 2. Open the Live Telemetry Station
+Open your web browser and go to:
 ```
 http://localhost:8080/
 ```
-You will see the **RollSafe Telemetry Station** dashboard displaying the live 90/10 traffic split and health status.
+You will see the dark-themed **RollSafe Telemetry Station** displaying the active 90% stable / 10% canary traffic split, live SRE audit logs, and system health status.
+
+#### 3. Send Normal Traffic
+In a second terminal window, send simulated user requests:
+```bash
+python deploy/scripts/simulate_traffic.py --count 25
+```
+You will see approximately 90% of requests handled by `stable (v1)` and 10% handled by `canary (v2)`. All return `HTTP 200 OK` in green.
+
+#### 4. Inject a Fault & Watch the Instant Rollback
+In the second terminal, inject an intentional fault into the canary:
+```bash
+python deploy/scripts/simulate_traffic.py --inject-fault --count 15
+```
+**What happens in real-time:**
+1. The canary begins returning HTTP 500 errors.
+2. The controller evaluates error samples and logs 3 consecutive anomaly warnings.
+3. The circuit breaker trips! In under 40 milliseconds, the controller rewires the gateway to divert **100% of traffic back to stable**.
+4. Check your browser: The dashboard flips to **`EMERGENCY ROLLED BACK`** and user requests continue without a single dropped connection.
 
 ---
 
-### Step 3: Send Baseline Traffic
-In a new terminal window, simulate normal user traffic:
+### Method B: Containerized Run (Docker Compose)
+*For environments with Docker Desktop installed.*
+
+#### 1. Launch All Containers
 ```bash
-python scripts/simulate_traffic.py --count 30
+cd deploy
+docker compose up -d
 ```
-**Output:** You will observe approximately 9 out of 10 requests handled by `stable (v1)` and 1 out of 10 handled by `canary (v2)`. All return `HTTP 200 OK`.
+This starts all 4 containers (`gateway`, `app-stable`, `app-canary`, and `controller`).
 
----
-
-### Step 4: Inject Failure & Observe Instant Rollback
-Now, simulate a broken release on the canary container:
+#### 2. Verify Container Health
 ```bash
-python scripts/simulate_traffic.py --inject-fault --count 20
+docker compose ps
 ```
 
-**What Happens in Real-time:**
-1. The script hits the canary's fault endpoint, generating HTTP 500 errors.
-2. The RollSafe controller detects the error rate crossing the 5% threshold.
-3. The controller logs:
-   ```text
-   [RollSafe-Engine] ⚠️ Anomaly detected! Consecutive fail count: 1/3
-   [RollSafe-Engine] ⚠️ Anomaly detected! Consecutive fail count: 2/3
-   [RollSafe-Engine] 🚨 TRIGGERING INSTANT ROLLBACK: Error rate 100.0% exceeded threshold (5.0%)
-   [RollSafe-Engine] ✅ NGINX dynamic weights updated: Traffic diverted to 100% stable.
-   [RollSafe-Engine] ✅ Zero-downtime failover completed in < 50ms.
-   ```
-4. Check `http://localhost:8080/` in your browser: The dashboard flips to `EMERGENCY ROLLED BACK` and 100% of user traffic is safely served by `app-stable`. Zero downtime.
+#### 3. Access Dashboard & Test
+- Open `http://localhost:8080/` in your browser.
+- Run `python scripts/simulate_traffic.py --count 30` to test normal routing.
+- Run `python scripts/simulate_traffic.py --inject-fault --count 20` to test automatic rollback.
+- Tear down when finished: `docker compose down`.
 
 ---
 
