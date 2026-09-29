@@ -121,6 +121,46 @@
         .log-warn { color: var(--amber); }
         .log-error { color: var(--red); }
         .log-success { color: var(--green); }
+        .log-info { color: var(--blue); }
+
+        .explanation {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            color: #ffffff;
+            transition: opacity 0.2s;
+        }
+        
+        .btn:hover {
+            opacity: 0.8;
+        }
+
+        .btn-primary { background: var(--blue); color: #0d1117; }
+        .btn-danger { background: var(--red); }
+        .btn-success { background: var(--green); }
     </style>
 </head>
 <body>
@@ -129,6 +169,19 @@
             <span>🛡️ RollSafe Telemetry Station</span>
         </div>
         <div id="status-badge" class="badge badge-healthy">Canary Active (90% / 10%)</div>
+    </div>
+
+    <div class="explanation">
+        <strong>About RollSafe:</strong> RollSafe is an automated circuit breaker for software deployments. 
+        When we release a new version (a 'canary'), we only send it 10% of our user traffic. 
+        If the new version starts failing (like a short circuit), RollSafe instantly detects the anomaly and 
+        automatically reroutes all traffic back to the stable version, preventing widespread outages without requiring manual human intervention.
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-primary" onclick="simulateTraffic()">🚀 Simulate Normal Traffic</button>
+        <button class="btn btn-danger" onclick="injectFault()">⚠️ Inject Canary Fault</button>
+        <button class="btn btn-success" onclick="resetSystem()">🔄 Reset System</button>
     </div>
 
     <div class="grid">
@@ -170,6 +223,43 @@
             const time = new Date().toLocaleTimeString();
             line.textContent = `[${time}] ${msg}`;
             box.prepend(line);
+        }
+
+        function simulateTraffic() {
+            appendLog("Generating background traffic...", "info");
+            // Send 15 requests spread over 1.5 seconds
+            for(let i=0; i<15; i++) {
+                setTimeout(() => {
+                    fetch('/api/test', { headers: { 'Accept': 'application/json' } }).catch(() => {});
+                }, i * 100);
+            }
+        }
+
+        async function injectFault() {
+            try {
+                const res = await fetch("/inject-fault");
+                if (res.ok) {
+                    appendLog("Manual override: Injected 500 errors into canary version.", "warn");
+                }
+            } catch (e) {
+                appendLog("Failed to inject fault. Is the server running?", "error");
+            }
+        }
+
+        async function resetSystem() {
+            try {
+                const res = await fetch("/reset-fault");
+                if (res.ok) {
+                    appendLog("System reset. Restoring healthy state and 90/10 traffic split.", "success");
+                    document.getElementById("status-badge").className = "badge badge-healthy";
+                    document.getElementById("status-badge").textContent = "Canary Active (90% / 10%)";
+                    document.getElementById("traffic-split").textContent = "90% v1 / 10% v2";
+                    document.getElementById("bar-stable").style.width = "90%";
+                    document.getElementById("bar-canary").style.width = "10%";
+                }
+            } catch (e) {
+                appendLog("Failed to reset system. Is the server running?", "error");
+            }
         }
 
         // Periodic simulation update (reads real status in production)
