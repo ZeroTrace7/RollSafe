@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: rollsafe-success-rate
+  namespace: rollsafe
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-ratio
+      interval: 30s
+      # Abort instantly if success rate drops below 99%
+      successCondition: len(result) == 0 || result[0] >= 0.99
+      failureLimit: 0
+      provider:
+        prometheus:
+          address: http://prometheus-server.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(
+              rollsafe_requests_total{service="{{args.service-name}}", success="true"}[1m])
+            ) by (service)
+            /
+            sum(rate(
+              rollsafe_requests_total{service="{{args.service-name}}"}[1m])
+            ) by (service)
+            unless sum(rate(
+              rollsafe_requests_total{service="{{args.service-name}}"}[1m])
+            ) by (service) == 0
