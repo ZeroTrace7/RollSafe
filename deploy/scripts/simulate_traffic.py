@@ -23,13 +23,18 @@ def send_request(url: str):
     start = time.time()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "RollSafe-Traffic-Bot/1.0", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=2) as resp:
             elapsed = (time.time() - start) * 1000
             data = json.loads(resp.read().decode())
             return resp.status, data.get("deployment", "unknown"), data.get("version", ""), elapsed
     except urllib.error.HTTPError as e:
         elapsed = (time.time() - start) * 1000
-        return e.code, "canary-fault", "v2-error", elapsed
+        try:
+            data = json.loads(e.read().decode())
+            deploy = data.get("deployment", "canary-fault")
+        except Exception:
+            deploy = "canary-fault"
+        return e.code, deploy, "v2-error", elapsed
     except Exception as e:
         elapsed = (time.time() - start) * 1000
         return 503, "gateway-error", str(e), elapsed
@@ -38,20 +43,25 @@ def main():
     parser = argparse.ArgumentParser(description="RollSafe Traffic Generator")
     parser.add_argument("--url", default="http://localhost:8080", help="Target gateway URL")
     parser.add_argument("--count", type=int, default=30, help="Total requests to send")
-    parser.add_argument("--delay", type=float, default=0.15, help="Delay between requests in seconds")
+    parser.add_argument("--delay", type=float, default=0.1, help="Delay between requests in seconds")
     parser.add_argument("--inject-fault", action="store_true", help="Simulate broken canary release")
     args = parser.parse_args()
 
     print("=" * 65)
     print(f"[ROLLSAFE] Traffic Generator -> {args.url}")
     if args.inject_fault:
-        print("[!] FAULT INJECTION ENABLED: Sending requests to trigger canary 500s!")
+        print("[!] FAULT INJECTION ENABLED: Triggering canary internal memory fault...")
+        try:
+            with urllib.request.urlopen(f"{args.url}/inject-fault", timeout=2) as r:
+                pass
+        except Exception as e:
+            print(f"[!] Warning triggering fault: {e}")
     else:
         print("[OK] NORMAL TRAFFIC MODE: Testing progressive weighted distribution")
     print("=" * 65)
 
     stats = {"stable": 0, "canary": 0, "errors": 0}
-    target = f"{args.url}/error" if args.inject_fault else f"{args.url}/"
+    target = f"{args.url}/api/v1/resource"
 
     for i in range(1, args.count + 1):
         status, deployment, version, elapsed = send_request(target)
