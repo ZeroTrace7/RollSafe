@@ -17,6 +17,7 @@ import random
 import sys
 import threading
 import time
+from socketserver import ThreadingMixIn
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
@@ -27,6 +28,10 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 # Shared Runtime State
 STATE = {
@@ -47,7 +52,7 @@ STATE = {
         "[MONITOR] Anomaly detection probe connected to app-canary:8082. Steady-state verified."
     ]
 }
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 
 def add_log(msg):
     with LOCK:
@@ -158,6 +163,31 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode())
             return
 
+        # Direct fault trigger endpoint
+        if self.path == "/inject-fault":
+            with LOCK:
+                STATE["canary_fault_active"] = True
+            add_log("[WARN] SIMULATION TRIGGER: Fault injected into Canary container!")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "Canary fault activated"}')
+            return
+
+        if self.path == "/reset-fault":
+            with LOCK:
+                STATE["canary_fault_active"] = False
+                STATE["rolled_back"] = False
+                STATE["stable_weight"] = 90
+                STATE["canary_weight"] = 10
+                STATE["consecutive_failures"] = 0
+            add_log("[RESET] SIMULATION RESET: Canary restored healthy.")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "Canary reset healthy"}')
+            return
+
         # Serve Dashboard Web UI for browser requests, proxy to backend for API bots
         is_api_request = (
             "application/json" in self.headers.get("Accept", "")
@@ -179,12 +209,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # Trigger Fault Endpoint
-        if self.path == "/error" or "inject" in self.path:
-            with LOCK:
-                STATE["canary_fault_active"] = True
-            add_log("[WARN] FAULT INJECTION DETECTED via Gateway.")
-
         # Proxy user traffic to backends based on dynamic weights
         with LOCK:
             STATE["total_requests"] += 1
@@ -203,7 +227,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         try:
             target_url = f"http://127.0.0.1:{target_port}{self.path}"
             req = urllib.request.Request(target_url, headers={"User-Agent": "RollSafe-Gateway/1.0"})
-            with urllib.request.urlopen(req, timeout=2) as resp:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
                 self.send_response(resp.status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -224,26 +248,26 @@ class GatewayHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------
 def controller_worker():
     while True:
-        time.sleep(1.5)
+        time.sleep(1.0)
         if STATE["rolled_back"]:
             continue
 
         # Probe canary service
         errors = 0
-        samples = 6
+        samples = 5
         latencies = []
 
         for _ in range(samples):
             t0 = time.time()
             try:
-                with urllib.request.urlopen("http://127.0.0.1:8082/health", timeout=1) as resp:
+                with urllib.request.urlopen("http://127.0.0.1:8082/health", timeout=0.8) as resp:
                     latencies.append((time.time() - t0) * 1000)
                     if resp.status >= 500:
                         errors += 1
             except Exception:
                 errors += 1
                 latencies.append((time.time() - t0) * 1000)
-            time.sleep(0.04)
+            time.sleep(0.02)
 
         error_rate = errors / samples
         avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
@@ -270,7 +294,7 @@ def controller_worker():
                 STATE["consecutive_failures"] = 0
 
 def start_server(port, handler_class):
-    server = HTTPServer(("0.0.0.0", port), handler_class)
+    server = ThreadedHTTPServer(("0.0.0.0", port), handler_class)
     server.serve_forever()
 
 if __name__ == "__main__":
