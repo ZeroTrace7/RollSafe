@@ -3,12 +3,6 @@
 RollSafe Standalone Local Demo Runner
 Runs the full RollSafe Progressive Canary & Rollback Architecture locally
 using standard Python 3 (no Docker or Kubernetes installation required).
-
-Architecture:
-  - :8081 -> Stable Microservice (v1.0.0)
-  - :8082 -> Canary Microservice (v2.0.0, fault-injectable)
-  - :8080 -> Gateway (Serves Dashboard + Weighted 90/10 Reverse Proxy)
-  - Background Thread -> Anomaly Controller (Trips rollback on 5% error rate)
 """
 
 import json
@@ -22,7 +16,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
 
-# Ensure UTF-8 output where supported
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -35,33 +28,43 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 # Shared Runtime State
 STATE = {
+    "status": "IDLE",  # IDLE, DEPLOYING, ROLLED_BACK, COMPLETED
+    "current_stage_index": -1,
+    "stages": [5, 10, 25, 50, 100],
+    "stage_start_time": 0,
+    
     "canary_fault_active": False,
-    "rolled_back": False,
-    "canary_weight": 10,  # 10%
-    "stable_weight": 90,  # 90%
+    "canary_weight": 0,   # Starts at 0%
+    "stable_weight": 100, # Starts at 100%
+    
     "consecutive_failures": 0,
     "threshold_required": 3,
-    "total_requests": 0,
+    
+    # Real metrics
     "stable_requests": 0,
     "canary_requests": 0,
+    "stable_errors": 0,
     "canary_errors": 0,
+    "stable_latency_sum": 0.0,
+    "canary_latency_sum": 0.0,
+    
     "last_error_rate": 0.0,
-    "last_avg_latency_ms": 12.4,
-    "logs": [
-        "[INIT] RollSafe Gateway initialized with weighted traffic distribution (90% stable / 10% canary).",
-        "[MONITOR] Anomaly detection probe connected to app-canary:8082. Steady-state verified."
-    ]
+    "last_avg_latency_ms": 12.0,
+    
+    "timeline": []
 }
 LOCK = threading.RLock()
 
-def add_log(msg):
-    with LOCK:
-        timestamp = time.strftime("%H:%M:%S")
-        entry = f"[{timestamp}] {msg}"
-        STATE["logs"].insert(0, entry)
-        if len(STATE["logs"]) > 25:
-            STATE["logs"].pop()
-        print(f"[*] {entry}")
+def add_timeline(msg):
+    timestamp = time.strftime("%H:%M:%S")
+    entry = {"time": timestamp, "msg": msg}
+    STATE["timeline"].insert(0, entry)
+    if len(STATE["timeline"]) > 30:
+        STATE["timeline"].pop()
+    try:
+        print(f"[*] [{timestamp}] {msg.encode('ascii', 'ignore').decode('ascii')}")
+    except Exception:
+        pass
 
 # ---------------------------------------------------------
 # 1. Stable Service Handler (:8081)
@@ -74,9 +77,8 @@ class StableHandler(BaseHTTPRequestHandler):
         self.end_headers()
         payload = {
             "status": "healthy",
-            "version": "v1.0.0-stable",
-            "deployment": "stable",
-            "cluster_node": "node-us-east-1a"
+            "version": "v1.0.0",
+            "deployment": "stable"
         }
         self.wfile.write(json.dumps(payload).encode())
 
@@ -86,33 +88,11 @@ class StableHandler(BaseHTTPRequestHandler):
 class CanaryHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): return
     def do_GET(self):
-        if self.path == "/inject-fault":
-            with LOCK:
-                STATE["canary_fault_active"] = True
-            add_log("[WARN] SIMULATION TRIGGER: Fault injected into Canary container! Returning HTTP 500 errors.")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"message": "Canary fault activated"}')
-            return
-
-        if self.path == "/reset-fault":
-            with LOCK:
-                STATE["canary_fault_active"] = False
-                STATE["rolled_back"] = False
-                STATE["stable_weight"] = 90
-                STATE["canary_weight"] = 10
-                STATE["consecutive_failures"] = 0
-            add_log("[RESET] SIMULATION RESET: Canary restored to healthy state (90% / 10% split).")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"message": "Canary reset healthy"}')
-            return
-
-        is_error = STATE["canary_fault_active"] or (self.path == "/error")
-
-        if is_error:
+        is_error = False
+        with LOCK:
+            is_error = STATE["canary_fault_active"]
+        
+        if is_error or self.path == "/error":
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -128,9 +108,8 @@ class CanaryHandler(BaseHTTPRequestHandler):
             self.end_headers()
             payload = {
                 "status": "healthy",
-                "version": "v2.0.0-canary",
-                "deployment": "canary",
-                "cluster_node": "node-us-east-1b"
+                "version": "v2.0.0",
+                "deployment": "canary"
             }
             self.wfile.write(json.dumps(payload).encode())
 
@@ -140,55 +119,135 @@ class CanaryHandler(BaseHTTPRequestHandler):
 class GatewayHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): return
 
+    def _send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/api/deployments/start":
+            with LOCK:
+                if STATE["status"] not in ["DEPLOYING"]:
+                    STATE["status"] = "DEPLOYING"
+                    STATE["current_stage_index"] = 0
+                    STATE["canary_weight"] = STATE["stages"][0]
+                    STATE["stable_weight"] = 100 - STATE["canary_weight"]
+                    STATE["stage_start_time"] = time.time()
+                    STATE["consecutive_failures"] = 0
+                    STATE["canary_fault_active"] = False
+                    
+                    # Reset metrics for fresh comparison
+                    STATE["stable_requests"] = 0
+                    STATE["canary_requests"] = 0
+                    STATE["stable_errors"] = 0
+                    STATE["canary_errors"] = 0
+                    STATE["stable_latency_sum"] = 0.0
+                    STATE["canary_latency_sum"] = 0.0
+                    STATE["timeline"] = []
+                    
+                    add_timeline("Deployment of v2.0.0 started")
+                    add_timeline(f"Canary traffic set to {STATE['canary_weight']}%")
+            
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "Deployment started"}')
+            return
+
+        if self.path == "/api/deployments/rollback":
+            with LOCK:
+                if STATE["status"] == "DEPLOYING":
+                    STATE["status"] = "ROLLED_BACK"
+                    STATE["canary_weight"] = 0
+                    STATE["stable_weight"] = 100
+                    add_timeline("Manual rollback triggered by user")
+                    add_timeline("Traffic fully reverted to v1.0.0 stable")
+            
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "Rolled back manually"}')
+            return
+
+        if self.path == "/inject-fault":
+            with LOCK:
+                STATE["canary_fault_active"] = True
+                add_timeline("⚠️ Fault injected into Canary release")
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "Fault injected"}')
+            return
+            
+        if self.path == "/reset-system":
+            with LOCK:
+                STATE["status"] = "IDLE"
+                STATE["current_stage_index"] = -1
+                STATE["canary_weight"] = 0
+                STATE["stable_weight"] = 100
+                STATE["canary_fault_active"] = False
+                STATE["consecutive_failures"] = 0
+                STATE["timeline"] = []
+                add_timeline("System reset to IDLE (100% stable)")
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"message": "System reset"}')
+            return
+            
+        self.send_response(404)
+        self.end_headers()
+
     def do_GET(self):
-        # Serve status JSON for the dashboard
         if self.path == "/status.json":
             self.send_response(200)
+            self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             with LOCK:
+                s_req = max(1, STATE["stable_requests"])
+                c_req = max(1, STATE["canary_requests"])
+                
+                s_err_rate = STATE["stable_errors"] / s_req
+                c_err_rate = STATE["canary_errors"] / c_req
+                
+                s_lat = STATE["stable_latency_sum"] / s_req if STATE["stable_requests"] > 0 else 0
+                c_lat = STATE["canary_latency_sum"] / c_req if STATE["canary_requests"] > 0 else 0
+                
                 data = {
-                    "rolled_back": STATE["rolled_back"],
+                    "status": STATE["status"],
                     "stable_weight": STATE["stable_weight"],
                     "canary_weight": STATE["canary_weight"],
+                    "stages": STATE["stages"],
+                    "current_stage_index": STATE["current_stage_index"],
                     "consecutive_failures": STATE["consecutive_failures"],
                     "threshold_required": STATE["threshold_required"],
                     "metrics": {
-                        "error_rate": STATE["last_error_rate"],
-                        "avg_latency_ms": STATE["last_avg_latency_ms"]
+                        "stable": {
+                            "requests": STATE["stable_requests"],
+                            "error_rate": s_err_rate,
+                            "latency_ms": s_lat
+                        },
+                        "canary": {
+                            "requests": STATE["canary_requests"],
+                            "error_rate": c_err_rate,
+                            "latency_ms": c_lat
+                        }
                     },
-                    "logs": STATE["logs"]
+                    "timeline": STATE["timeline"]
                 }
             self.wfile.write(json.dumps(data).encode())
             return
 
-        # Direct fault trigger endpoint
-        if self.path == "/inject-fault":
-            with LOCK:
-                STATE["canary_fault_active"] = True
-            add_log("[WARN] SIMULATION TRIGGER: Fault injected into Canary container!")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"message": "Canary fault activated"}')
-            return
-
-        if self.path == "/reset-fault":
-            with LOCK:
-                STATE["canary_fault_active"] = False
-                STATE["rolled_back"] = False
-                STATE["stable_weight"] = 90
-                STATE["canary_weight"] = 10
-                STATE["consecutive_failures"] = 0
-            add_log("[RESET] SIMULATION RESET: Canary restored healthy.")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"message": "Canary reset healthy"}')
-            return
-
-        # Serve Dashboard Web UI for browser requests, proxy to backend for API bots
         is_api_request = (
             "application/json" in self.headers.get("Accept", "")
             or "RollSafe-Traffic-Bot" in self.headers.get("User-Agent", "")
@@ -207,91 +266,122 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.wfile.write(content)
                 return
             except Exception:
-                pass
+                self.send_response(404)
+                self.end_headers()
+                return
 
-        # Proxy user traffic to backends based on dynamic weights
+        # Traffic proxying
         with LOCK:
-            STATE["total_requests"] += 1
-            if STATE["rolled_back"] or STATE["canary_weight"] == 0:
+            roll = random.randint(1, 100)
+            if roll <= STATE["canary_weight"]:
+                target_port = 8082
+                STATE["canary_requests"] += 1
+            else:
                 target_port = 8081
                 STATE["stable_requests"] += 1
-            else:
-                roll = random.randint(1, 100)
-                if roll <= STATE["canary_weight"]:
-                    target_port = 8082
-                    STATE["canary_requests"] += 1
-                else:
-                    target_port = 8081
-                    STATE["stable_requests"] += 1
 
+        t0 = time.time()
+        target_url = f"http://127.0.0.1:{target_port}{self.path}"
         try:
-            target_url = f"http://127.0.0.1:{target_port}{self.path}"
             req = urllib.request.Request(target_url, headers={"User-Agent": "RollSafe-Gateway/1.0"})
             with urllib.request.urlopen(req, timeout=1.5) as resp:
+                lat = (time.time() - t0) * 1000
+                with LOCK:
+                    if target_port == 8081:
+                        STATE["stable_latency_sum"] += lat
+                    else:
+                        STATE["canary_latency_sum"] += lat
+                
                 self.send_response(resp.status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(resp.read())
         except urllib.error.HTTPError as e:
+            lat = (time.time() - t0) * 1000
+            with LOCK:
+                if target_port == 8081:
+                    STATE["stable_errors"] += 1
+                    STATE["stable_latency_sum"] += lat
+                else:
+                    STATE["canary_errors"] += 1
+                    STATE["canary_latency_sum"] += lat
             self.send_response(e.code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(e.read())
         except Exception as e:
+            lat = (time.time() - t0) * 1000
+            with LOCK:
+                if target_port == 8081:
+                    STATE["stable_errors"] += 1
+                    STATE["stable_latency_sum"] += lat
+                else:
+                    STATE["canary_errors"] += 1
+                    STATE["canary_latency_sum"] += lat
             self.send_response(502)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Bad Gateway", "details": str(e)}).encode())
 
 # ---------------------------------------------------------
-# 4. Background Controller Daemon (Flapping Prevention & Rollback)
+# 4. Background Controller Daemon (Progressive Rollout & Rollback)
 # ---------------------------------------------------------
 def controller_worker():
+    add_timeline("System initialized. Awaiting deployment commands.")
     while True:
         time.sleep(1.0)
-        if STATE["rolled_back"]:
+        
+        with LOCK:
+            status = STATE["status"]
+            canary_w = STATE["canary_weight"]
+            
+        if status != "DEPLOYING" or canary_w == 0:
             continue
 
-        # Probe canary service
+        # Active Anomaly Probing
         errors = 0
         samples = 5
-        latencies = []
-
         for _ in range(samples):
-            t0 = time.time()
             try:
                 with urllib.request.urlopen("http://127.0.0.1:8082/health", timeout=0.8) as resp:
-                    latencies.append((time.time() - t0) * 1000)
                     if resp.status >= 500:
                         errors += 1
             except Exception:
                 errors += 1
-                latencies.append((time.time() - t0) * 1000)
             time.sleep(0.02)
 
         error_rate = errors / samples
-        avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
 
         with LOCK:
-            STATE["last_error_rate"] = error_rate
-            STATE["last_avg_latency_ms"] = avg_lat
-
+            # Check for failure
             if error_rate > 0.05:
                 STATE["consecutive_failures"] += 1
-                add_log(f"[WARN] Canary error spike: {error_rate*100:.0f}% (Window {STATE['consecutive_failures']}/{STATE['threshold_required']})")
-
                 if STATE["consecutive_failures"] >= STATE["threshold_required"]:
-                    # EXECUTE EMERGENCY ROLLBACK
-                    STATE["rolled_back"] = True
+                    STATE["status"] = "ROLLED_BACK"
                     STATE["canary_weight"] = 0
                     STATE["stable_weight"] = 100
-                    add_log("[CRITICAL] EMERGENCY AUTO-ROLLBACK TRIGGERED!")
-                    add_log("[FAILOVER] Circuit breaker tripped: Traffic diverted 100% to stable (v1.0.0).")
-                    add_log("[SUCCESS] Zero-downtime failover executed in < 40ms.")
+                    add_timeline(f"⚠️ Anomaly detected: Error rate {error_rate*100:.0f}% exceeded threshold")
+                    add_timeline("🚨 EMERGENCY AUTO-ROLLBACK TRIGGERED")
+                    add_timeline("Traffic fully reverted to v1.0.0 stable")
             else:
-                if STATE["consecutive_failures"] > 0:
-                    add_log("[INFO] Transient spike cleared. Flapping counter reset to 0.")
                 STATE["consecutive_failures"] = 0
+                
+                # Check for stage progression (Promote every 10 seconds)
+                if STATE["status"] == "DEPLOYING":
+                    elapsed = time.time() - STATE["stage_start_time"]
+                    if elapsed >= 10.0:
+                        next_idx = STATE["current_stage_index"] + 1
+                        if next_idx < len(STATE["stages"]):
+                            STATE["current_stage_index"] = next_idx
+                            new_weight = STATE["stages"][next_idx]
+                            STATE["canary_weight"] = new_weight
+                            STATE["stable_weight"] = 100 - new_weight
+                            STATE["stage_start_time"] = time.time()
+                            add_timeline(f"Health checks passed. Traffic increased to {new_weight}%")
+                            
+                            if new_weight == 100:
+                                STATE["status"] = "COMPLETED"
+                                add_timeline("✅ Deployment of v2.0.0 completed successfully")
 
 def start_server(port, handler_class):
     server = ThreadedHTTPServer(("0.0.0.0", port), handler_class)
@@ -309,15 +399,12 @@ if __name__ == "__main__":
     threading.Thread(target=controller_worker, daemon=True).start()
 
     time.sleep(0.5)
-    print("[OK] [Port 8081] Stable Microservice (v1.0.0-stable) online")
-    print("[OK] [Port 8082] Canary Microservice (v2.0.0-canary) online")
-    print("[OK] [Port 8080] RollSafe Gateway & Telemetry Station online")
-    print("[OK] [Daemon]    Anomaly & Flapping Controller running")
+    print("[OK] [Port 8081] Stable Microservice (v1.0.0) online")
+    print("[OK] [Port 8082] Canary Microservice (v2.0.0) online")
+    print("[OK] [Port 8080] RollSafe Gateway & API online")
+    print("[OK] [Daemon]    Progressive Delivery Controller running")
     print("=" * 70)
     print("\n>>> OPEN YOUR BROWSER AT:  http://localhost:8080/")
-    print("\n>>> In another terminal, run traffic tests:")
-    print("    Normal: python deploy/scripts/simulate_traffic.py --count 30")
-    print("    Fault:  python deploy/scripts/simulate_traffic.py --inject-fault --count 20")
     print("=" * 70)
 
     try:

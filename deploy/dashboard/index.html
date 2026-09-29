@@ -3,144 +3,234 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RollSafe — Anomaly & Rollback Monitor</title>
+    <title>RollSafe — DevOps Delivery Platform</title>
     <style>
         :root {
-            --bg: #0d1117;
-            --card-bg: #161b22;
-            --border: #30363d;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --green: #238636;
-            --red: #da3633;
-            --amber: #d29922;
-            --blue: #58a6ff;
+            --bg-color: #0b0f19;
+            --panel-bg: #111827;
+            --border-color: #1f2937;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
         }
 
+        * { box-sizing: border-box; }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
             margin: 0;
-            padding: 30px;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 250px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand {
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-item {
+            padding: 10px 15px;
+            color: var(--text-muted);
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .nav-item.active {
+            background-color: rgba(59, 130, 246, 0.1);
+            color: var(--accent-blue);
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 30px 40px;
+            overflow-y: auto;
         }
 
         .header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 20px;
+            align-items: flex-end;
             margin-bottom: 30px;
         }
 
-        .title {
-            font-size: 24px;
-            font-weight: 700;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .badge {
-            font-size: 13px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-healthy { background: rgba(35, 134, 54, 0.2); color: #3fb950; border: 1px solid #238636; }
-        .badge-degraded { background: rgba(210, 153, 34, 0.2); color: #d29922; border: 1px solid #d29922; }
-        .badge-rolledback { background: rgba(218, 54, 51, 0.2); color: #f85149; border: 1px solid #da3633; }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-        }
-
-        .card-label {
-            font-size: 13px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .card-value {
+        .header h1 {
+            margin: 0;
             font-size: 28px;
-            font-weight: 700;
-            color: #ffffff;
+            font-weight: 600;
         }
 
-        .progress-bar {
+        .system-status {
+            display: flex;
+            gap: 20px;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: 1px solid currentColor;
+        }
+        .status-idle { color: var(--text-muted); background: rgba(156, 163, 175, 0.1); }
+        .status-deploying { color: var(--accent-blue); background: rgba(59, 130, 246, 0.1); }
+        .status-completed { color: var(--accent-green); background: rgba(16, 185, 129, 0.1); }
+        .status-rolledback { color: var(--accent-red); background: rgba(239, 68, 68, 0.1); }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .panel-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Canary Progress */
+        .progress-container {
+            margin-bottom: 30px;
+        }
+        
+        .progress-bar-bg {
             height: 12px;
-            background: var(--border);
+            background-color: var(--border-color);
             border-radius: 6px;
             overflow: hidden;
             display: flex;
-            margin-top: 15px;
+            margin-bottom: 10px;
         }
 
         .progress-stable {
-            background: var(--green);
-            transition: width 0.4s ease;
+            background-color: var(--accent-green);
+            transition: width 0.5s ease;
         }
 
         .progress-canary {
-            background: var(--blue);
-            transition: width 0.4s ease;
+            background-color: var(--accent-blue);
+            transition: width 0.5s ease;
         }
 
-        .log-box {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        .stage-markers {
+            display: flex;
+            justify-content: space-between;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .stage-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .stage-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--border-color);
+        }
+        .stage-marker.active .stage-dot { background-color: var(--accent-blue); box-shadow: 0 0 10px var(--accent-blue); }
+        .stage-marker.passed .stage-dot { background-color: var(--accent-green); }
+
+        /* Metrics Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 0;
+            text-align: right;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        th:first-child, td:first-child { text-align: left; }
+        
+        th {
+            color: var(--text-muted);
             font-size: 13px;
-            height: 220px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        td {
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .val-stable { color: var(--text-main); }
+        .val-canary { color: var(--accent-blue); }
+        .val-error { color: var(--accent-red); }
+
+        /* Timeline */
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: 400px;
             overflow-y: auto;
         }
 
-        .log-line {
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(48, 54, 61, 0.4);
-        }
-
-        .log-warn { color: var(--amber); }
-        .log-error { color: var(--red); }
-        .log-success { color: var(--green); }
-        .log-info { color: var(--blue); }
-
-        .explanation {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            line-height: 1.6;
-            font-size: 15px;
-        }
-
-        .controls {
+        .timeline-event {
             display: flex;
             gap: 15px;
-            margin-bottom: 30px;
-            padding: 20px;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .timeline-time {
+            color: var(--text-muted);
+            min-width: 60px;
+        }
+        
+        .timeline-msg {
+            color: var(--text-main);
+            line-height: 1.4;
+        }
+
+        /* Action Buttons */
+        .actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 12px;
         }
 
         .btn {
@@ -150,140 +240,276 @@
             font-weight: 600;
             cursor: pointer;
             border: none;
-            color: #ffffff;
-            transition: opacity 0.2s;
-        }
-        
-        .btn:hover {
-            opacity: 0.8;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        .btn-primary { background: var(--blue); color: #0d1117; }
-        .btn-danger { background: var(--red); }
-        .btn-success { background: var(--green); }
+        .btn:hover { filter: brightness(1.1); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary { background-color: var(--accent-blue); color: white; }
+        .btn-danger { background-color: var(--accent-red); color: white; }
+        .btn-warning { background-color: var(--accent-yellow); color: black; }
+        .btn-outline { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-main); }
+        
+        /* Alert Banner */
+        .alert-banner {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: none;
+        }
+        .alert-banner.active {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .alert-title { color: var(--accent-red); font-weight: bold; font-size: 15px; }
+        .alert-desc { color: var(--text-main); font-size: 14px; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="title">
-            <span>🛡️ RollSafe Telemetry Station</span>
-        </div>
-        <div id="status-badge" class="badge badge-healthy">Canary Active (90% / 10%)</div>
+
+    <div class="sidebar">
+        <div class="brand">🛡️ RollSafe</div>
+        <div class="nav-item active">Deployment Dashboard</div>
+        <div class="nav-item">Services</div>
+        <div class="nav-item">Settings</div>
     </div>
 
-    <div class="explanation">
-        <strong>About RollSafe:</strong> RollSafe is an automated circuit breaker for software deployments. 
-        When we release a new version (a 'canary'), we only send it 10% of our user traffic. 
-        If the new version starts failing (like a short circuit), RollSafe instantly detects the anomaly and 
-        automatically reroutes all traffic back to the stable version, preventing widespread outages without requiring manual human intervention.
-    </div>
-
-    <div class="controls">
-        <button class="btn btn-primary" onclick="simulateTraffic()">🚀 Simulate Normal Traffic</button>
-        <button class="btn btn-danger" onclick="injectFault()">⚠️ Inject Canary Fault</button>
-        <button class="btn btn-success" onclick="resetSystem()">🔄 Reset System</button>
-    </div>
-
-    <div class="grid">
-        <div class="card">
-            <div class="card-label">Traffic Split</div>
-            <div class="card-value" id="traffic-split">90% v1 / 10% v2</div>
-            <div class="progress-bar">
-                <div id="bar-stable" class="progress-stable" style="width: 90%;"></div>
-                <div id="bar-canary" class="progress-canary" style="width: 10%;"></div>
+    <div class="main-content">
+        <div class="header">
+            <div>
+                <div style="color: var(--text-muted); font-size: 14px; margin-bottom: 5px;">SERVICE: orders-api</div>
+                <h1>Deployment Overview</h1>
+            </div>
+            <div class="system-status">
+                <div id="global-status" class="status-badge status-idle">IDLE (100% STABLE)</div>
             </div>
         </div>
 
-        <div class="card">
-            <div class="card-label">Canary Error Rate</div>
-            <div class="card-value" id="error-rate">0.0%</div>
-            <small style="color: var(--text-muted);">Threshold: 5.0% (Rollback Limit)</small>
+        <div id="alert-box" class="alert-banner">
+            <div class="alert-title">⚠ CANARY FAILURE DETECTED</div>
+            <div class="alert-desc">Error rate exceeded safety threshold. Automatic rollback executed.</div>
         </div>
 
-        <div class="card">
-            <div class="card-label">Flapping Anomaly Counter</div>
-            <div class="card-value" id="flapping-counter">0 / 3</div>
-            <small style="color: var(--text-muted);">Consecutive Failures Required</small>
-        </div>
-    </div>
+        <div class="dashboard-grid">
+            <div class="left-col">
+                <div class="panel" style="margin-bottom: 24px;">
+                    <div class="panel-header">
+                        <span>v1.0.0 (Stable) &nbsp;→&nbsp; v2.0.0 (Canary)</span>
+                        <span id="weight-text" style="color: var(--accent-blue);">Canary: 0%</span>
+                    </div>
 
-    <div class="card">
-        <div class="card-label">Real-time SRE Audit Logs</div>
-        <div class="log-box" id="log-box">
-            <div class="log-line log-success">[INIT] RollSafe Gateway initialized with weighted round-robin distribution.</div>
-            <div class="log-line log-success">[MONITOR] Sampling probe connected to app-canary:8080. Steady-state confirmed.</div>
+                    <div class="progress-container">
+                        <div class="progress-bar-bg">
+                            <div id="bar-stable" class="progress-stable" style="width: 100%;"></div>
+                            <div id="bar-canary" class="progress-canary" style="width: 0%;"></div>
+                        </div>
+                        
+                        <div class="stage-markers" id="stage-markers">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="actions">
+                        <button id="btn-start" class="btn btn-primary" onclick="startDeployment()">▶ Start Canary Deployment</button>
+                        <button id="btn-rollback" class="btn btn-danger" onclick="manualRollback()" disabled>↺ Manual Rollback</button>
+                        <button id="btn-fault" class="btn btn-warning" onclick="injectFault()">⚠ Inject Fault (Demo)</button>
+                        <button id="btn-reset" class="btn btn-outline" onclick="resetSystem()">⚙ Reset System</button>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">Real-Time Metrics Comparison</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>v1.0.0 (Stable)</th>
+                                <th>v2.0.0 (Canary)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Requests Evaluated</td>
+                                <td id="m-s-req" class="val-stable">0</td>
+                                <td id="m-c-req" class="val-canary">0</td>
+                            </tr>
+                            <tr>
+                                <td>Error Rate</td>
+                                <td id="m-s-err" class="val-stable">0.00%</td>
+                                <td id="m-c-err" class="val-canary">0.00%</td>
+                            </tr>
+                            <tr>
+                                <td>Avg Latency</td>
+                                <td id="m-s-lat" class="val-stable">0 ms</td>
+                                <td id="m-c-lat" class="val-canary">0 ms</td>
+                            </tr>
+                            <tr>
+                                <td>Success Rate</td>
+                                <td id="m-s-succ" class="val-stable">100.00%</td>
+                                <td id="m-c-succ" class="val-canary">100.00%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="right-col">
+                <div class="panel" style="height: 100%;">
+                    <div class="panel-header">Deployment Timeline</div>
+                    <div class="timeline" id="timeline-box">
+                        <!-- Events populated by JS -->
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        function appendLog(msg, type = "info") {
-            const box = document.getElementById("log-box");
-            const line = document.createElement("div");
-            line.className = `log-line log-${type}`;
-            const time = new Date().toLocaleTimeString();
-            line.textContent = `[${time}] ${msg}`;
-            box.prepend(line);
-        }
+        const API_BASE = "";
 
-        function simulateTraffic() {
-            appendLog("Generating background traffic...", "info");
-            // Send 15 requests spread over 1.5 seconds
-            for(let i=0; i<15; i++) {
-                setTimeout(() => {
-                    fetch('/api/test', { headers: { 'Accept': 'application/json' } }).catch(() => {});
-                }, i * 100);
-            }
-        }
-
-        async function injectFault() {
+        async function fetchAPI(endpoint, method = "POST") {
             try {
-                const res = await fetch("/inject-fault");
-                if (res.ok) {
-                    appendLog("Manual override: Injected 500 errors into canary version.", "warn");
-                }
+                await fetch(API_BASE + endpoint, { method });
+                pollStatus();
             } catch (e) {
-                appendLog("Failed to inject fault. Is the server running?", "error");
+                console.error("API Error:", e);
             }
         }
 
-        async function resetSystem() {
+        function startDeployment() { fetchAPI('/api/deployments/start'); simulateTrafficBackground(); }
+        function manualRollback() { fetchAPI('/api/deployments/rollback'); }
+        function injectFault() { fetchAPI('/inject-fault', 'POST'); }
+        function resetSystem() { fetchAPI('/reset-system', 'POST'); }
+
+        // Start background traffic loop to generate metrics
+        let trafficInterval = null;
+        function simulateTrafficBackground() {
+            if (trafficInterval) clearInterval(trafficInterval);
+            trafficInterval = setInterval(() => {
+                fetch('/api/test', { headers: { 'Accept': 'application/json', 'User-Agent': 'RollSafe-Traffic-Bot' } }).catch(()=>{});
+                fetch('/api/test2', { headers: { 'Accept': 'application/json', 'User-Agent': 'RollSafe-Traffic-Bot' } }).catch(()=>{});
+            }, 200); // 10 reqs/sec
+        }
+
+        function renderStages(stages, currentIdx) {
+            const container = document.getElementById('stage-markers');
+            container.innerHTML = '';
+            stages.forEach((stage, idx) => {
+                const el = document.createElement('div');
+                let stateClass = '';
+                if (idx < currentIdx) stateClass = 'passed';
+                else if (idx === currentIdx) stateClass = 'active';
+                
+                el.className = `stage-marker ${stateClass}`;
+                el.innerHTML = `
+                    <div class="stage-dot"></div>
+                    <div>${stage}%</div>
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        function renderTimeline(events) {
+            const box = document.getElementById('timeline-box');
+            box.innerHTML = '';
+            events.forEach(ev => {
+                const el = document.createElement('div');
+                el.className = 'timeline-event';
+                el.innerHTML = `
+                    <div class="timeline-time">${ev.time}</div>
+                    <div class="timeline-msg">${ev.msg}</div>
+                `;
+                box.appendChild(el);
+            });
+        }
+
+        async function pollStatus() {
             try {
-                const res = await fetch("/reset-fault");
-                if (res.ok) {
-                    appendLog("System reset. Restoring healthy state and 90/10 traffic split.", "success");
-                    document.getElementById("status-badge").className = "badge badge-healthy";
-                    document.getElementById("status-badge").textContent = "Canary Active (90% / 10%)";
-                    document.getElementById("traffic-split").textContent = "90% v1 / 10% v2";
-                    document.getElementById("bar-stable").style.width = "90%";
-                    document.getElementById("bar-canary").style.width = "10%";
+                const res = await fetch(API_BASE + '/status.json');
+                if (!res.ok) return;
+                const data = await res.json();
+
+                // Status Badge
+                const badge = document.getElementById('global-status');
+                badge.className = 'status-badge';
+                if (data.status === 'IDLE') {
+                    badge.classList.add('status-idle');
+                    badge.textContent = 'IDLE (100% STABLE)';
+                } else if (data.status === 'DEPLOYING') {
+                    badge.classList.add('status-deploying');
+                    badge.textContent = 'DEPLOYMENT IN PROGRESS';
+                } else if (data.status === 'COMPLETED') {
+                    badge.classList.add('status-completed');
+                    badge.textContent = 'DEPLOYMENT COMPLETED';
+                } else if (data.status === 'ROLLED_BACK') {
+                    badge.classList.add('status-rolledback');
+                    badge.textContent = 'EMERGENCY ROLLED BACK';
                 }
+
+                // Alert Banner
+                const alertBox = document.getElementById('alert-box');
+                if (data.status === 'ROLLED_BACK') {
+                    alertBox.classList.add('active');
+                } else {
+                    alertBox.classList.remove('active');
+                }
+
+                // Progress Bars & Stages
+                document.getElementById('bar-stable').style.width = `${data.stable_weight}%`;
+                document.getElementById('bar-canary').style.width = `${data.canary_weight}%`;
+                document.getElementById('weight-text').textContent = `Canary: ${data.canary_weight}%`;
+                
+                renderStages(data.stages, data.current_stage_index);
+
+                // Button States
+                document.getElementById('btn-start').disabled = (data.status === 'DEPLOYING');
+                document.getElementById('btn-rollback').disabled = (data.status !== 'DEPLOYING');
+
+                // Metrics
+                const sm = data.metrics.stable;
+                const cm = data.metrics.canary;
+                
+                document.getElementById('m-s-req').textContent = sm.requests;
+                document.getElementById('m-c-req').textContent = cm.requests;
+                
+                const sErrPct = (sm.error_rate * 100).toFixed(2);
+                const cErrPct = (cm.error_rate * 100).toFixed(2);
+                const sErrEl = document.getElementById('m-s-err');
+                const cErrEl = document.getElementById('m-c-err');
+                
+                sErrEl.textContent = sErrPct + '%';
+                cErrEl.textContent = cErrPct + '%';
+                
+                cErrEl.className = (cm.error_rate > 0.05) ? 'val-error' : 'val-canary';
+
+                document.getElementById('m-s-lat').textContent = sm.latency_ms.toFixed(1) + ' ms';
+                document.getElementById('m-c-lat').textContent = cm.latency_ms.toFixed(1) + ' ms';
+                
+                document.getElementById('m-s-succ').textContent = ((1 - sm.error_rate) * 100).toFixed(2) + '%';
+                document.getElementById('m-c-succ').textContent = ((1 - cm.error_rate) * 100).toFixed(2) + '%';
+
+                // Timeline
+                renderTimeline(data.timeline);
+
             } catch (e) {
-                appendLog("Failed to reset system. Is the server running?", "error");
+                // Background polling error ignored
             }
         }
 
-        // Periodic simulation update (reads real status in production)
-        setInterval(async () => {
-            try {
-                const res = await fetch("/status.json");
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.rolled_back) {
-                        document.getElementById("status-badge").className = "badge badge-rolledback";
-                        document.getElementById("status-badge").textContent = "EMERGENCY ROLLED BACK (100% STABLE)";
-                        document.getElementById("traffic-split").textContent = "100% v1 / 0% v2";
-                        document.getElementById("bar-stable").style.width = "100%";
-                        document.getElementById("bar-canary").style.width = "0%";
-                    }
-                    if (data.metrics) {
-                        document.getElementById("error-rate").textContent = (data.metrics.error_rate * 100).toFixed(1) + "%";
-                        document.getElementById("flapping-counter").textContent = `${data.consecutive_failures} / ${data.threshold_required}`;
-                    }
-                }
-            } catch (e) {
-                // local polling fallback
-            }
-        }, 1500);
+        // Init
+        setInterval(pollStatus, 1000);
+        pollStatus();
+        
+        // Auto-start background traffic generator slightly so numbers aren't completely 0 
+        // if user hasn't clicked deploy yet, but only stable will get it.
+        simulateTrafficBackground();
     </script>
 </body>
 </html>
