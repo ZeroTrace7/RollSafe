@@ -1,0 +1,77 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: rollsafe-service
+  namespace: rollsafe
+  labels:
+    app: rollsafe
+spec:
+  replicas: 4
+  strategy:
+    canary:
+      canaryService: rollsafe-canary
+      stableService: rollsafe-stable
+      trafficRouting:
+        nginx:
+          stableIngress: rollsafe-ingress
+          additionalIngressAnnotations:
+            canary-by-header: X-Canary-Tier
+      steps:
+        # Step 1: Route 20% traffic to canary and pause for manual/automated baseline check
+        - setWeight: 20
+        - pause: { duration: 1m }
+        # Step 2: Route 50% traffic to canary and run continuous Prometheus analysis
+        - setWeight: 50
+        - pause: { duration: 3m }
+        # Step 3: Route 80% traffic
+        - setWeight: 80
+        - pause: { duration: 2m }
+      # Automated Rollback Analysis Engine
+      analysis:
+        templates:
+          - templateName: rollsafe-success-rate
+        startingStep: 1
+        args:
+          - name: service-name
+            value: rollsafe-canary
+  selector:
+    matchLabels:
+      app: rollsafe
+  template:
+    metadata:
+      labels:
+        app: rollsafe
+    spec:
+      containers:
+        - name: rollsafe
+          image: shourya2101/rollsafe-core:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+            - name: METRICS_PORT
+              value: "9090"
+            - name: PROMETHEUS_ENABLED
+              value: "true"
+            - name: KUBERNETES_NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBERNETES_POD
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
