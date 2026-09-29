@@ -1,0 +1,46 @@
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: rollsafe-service
+  namespace: rollsafe
+spec:
+  # Deployment reference
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rollsafe-service
+  # Ingress reference
+  ingressRef:
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    name: rollsafe-ingress
+  # HPA reference (optional)
+  autoscalerRef:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    name: rollsafe-service
+  # Service mesh / Ingress provider
+  provider: nginx
+  service:
+    port: 80
+    targetPort: 8080
+    gateways:
+      - mesh
+    retries:
+      attempts: 3
+      perTryTimeout: 1s
+  # Canary analysis schedule and automated rollback triggers
+  analysis:
+    interval: 1m
+    threshold: 3 # Fail after 3 consecutive metric checks (flapping prevention)
+    maxWeight: 50
+    stepWeight: 10
+    metrics:
+      - name: request-success-rate
+        thresholdRange:
+          min: 99
+        interval: 1m
+      - name: request-duration
+        thresholdRange:
+          max: 500
+        interval: 30s
