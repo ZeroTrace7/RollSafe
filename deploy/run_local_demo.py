@@ -158,8 +158,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode())
             return
 
-        # Serve Dashboard Web UI
-        if self.path in ["/", "/index.html"]:
+        # Serve Dashboard Web UI for browser requests, proxy to backend for API bots
+        is_api_request = (
+            "application/json" in self.headers.get("Accept", "")
+            or "RollSafe-Traffic-Bot" in self.headers.get("User-Agent", "")
+            or self.path.startswith("/api")
+            or self.path in ["/success", "/error"]
+        )
+
+        if not is_api_request and self.path in ["/", "/index.html"]:
             dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard", "index.html")
             try:
                 with open(dashboard_path, "rb") as f:
