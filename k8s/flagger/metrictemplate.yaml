@@ -1,0 +1,15 @@
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: rollsafe-error-rate
+  namespace: rollsafe
+spec:
+  provider:
+    type: prometheus
+    address: http://prometheus-server.monitoring.svc.cluster.local:9090
+  query: |
+    100 - (
+      sum(rate(rollsafe_requests_total{service="{{ target }}-canary", success="true"}[1m]))
+      /
+      sum(rate(rollsafe_requests_total{service="{{ target }}-canary"}[1m]))
+    ) * 100
