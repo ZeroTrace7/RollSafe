@@ -22,7 +22,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 def send_request(url: str):
     start = time.time()
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "RollSafe-Traffic-Bot/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "RollSafe-Traffic-Bot/1.0", "Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             elapsed = (time.time() - start) * 1000
             data = json.loads(resp.read().decode())
