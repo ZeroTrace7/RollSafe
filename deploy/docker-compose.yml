@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # Stable production version (v1)
+  app-stable:
+    build:
+      context: ../core
+      dockerfile: Dockerfile
+    environment:
+      - HTTP_PORT=8080
+      - METRICS_PORT=9090
+      - APP_VERSION=v1.0.0-stable
+      - DEPLOYMENT_ENV=stable
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    restart: unless-stopped
+
+  # Canary progressive deployment version (v2)
+  app-canary:
+    build:
+      context: ../core
+      dockerfile: Dockerfile
+    environment:
+      - HTTP_PORT=8080
+      - METRICS_PORT=9090
+      - APP_VERSION=v2.0.0-canary
+      - DEPLOYMENT_ENV=canary
+    ports:
+      - "8082:8080"
+      - "9092:9090"
+    restart: unless-stopped
+
+  # Gateway Reverse Proxy with dynamic weighted routing
+  gateway:
+    image: nginx:1.25-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:rw
+      - ./dashboard/index.html:/usr/share/nginx/html/index.html:ro
+      - status-data:/usr/share/nginx/html:ro
+    depends_on:
+      - app-stable
+      - app-canary
+    restart: unless-stopped
+
+  # RollSafe Anomaly Detection & Auto-Rollback Engine
+  controller:
+    image: python:3.11-alpine
+    volumes:
+      - ./controller/monitor.py:/app/monitor.py:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - status-data:/app
+    environment:
+      - GATEWAY_URL=http://gateway:80
+      - CANARY_URL=http://app-canary:8080
+      - NGINX_CONF_PATH=/etc/nginx/nginx.conf
+      - STATUS_FILE_PATH=/app/status.json
+      - ERROR_RATE_THRESHOLD=0.05
+      - FLAPPING_CONSECUTIVE_FAILS=3
+    working_dir: /app
+    command: ["python", "monitor.py"]
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  status-data:
