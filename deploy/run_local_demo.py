@@ -21,6 +21,13 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
 
+# Ensure UTF-8 output where supported
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # Shared Runtime State
 STATE = {
     "canary_fault_active": False,
@@ -55,7 +62,7 @@ def add_log(msg):
 # 1. Stable Service Handler (:8081)
 # ---------------------------------------------------------
 class StableHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args): return  # Suppress default stdout noise
+    def log_message(self, format, *args): return
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -77,7 +84,7 @@ class CanaryHandler(BaseHTTPRequestHandler):
         if self.path == "/inject-fault":
             with LOCK:
                 STATE["canary_fault_active"] = True
-            add_log("⚠️ SIMULATION TRIGGER: Fault injected into Canary container! Throwing HTTP 500 errors.")
+            add_log("[WARN] SIMULATION TRIGGER: Fault injected into Canary container! Returning HTTP 500 errors.")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -91,7 +98,7 @@ class CanaryHandler(BaseHTTPRequestHandler):
                 STATE["stable_weight"] = 90
                 STATE["canary_weight"] = 10
                 STATE["consecutive_failures"] = 0
-            add_log("🔄 SIMULATION RESET: Canary restored to healthy state (90% / 10% split).")
+            add_log("[RESET] SIMULATION RESET: Canary restored to healthy state (90% / 10% split).")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -169,7 +176,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if self.path == "/error" or "inject" in self.path:
             with LOCK:
                 STATE["canary_fault_active"] = True
-            add_log("⚠️ FAULT INJECTION DETECTED via Gateway.")
+            add_log("[WARN] FAULT INJECTION DETECTED via Gateway.")
 
         # Proxy user traffic to backends based on dynamic weights
         with LOCK:
@@ -240,19 +247,19 @@ def controller_worker():
 
             if error_rate > 0.05:
                 STATE["consecutive_failures"] += 1
-                add_log(f"⚠️ Canary error spike: {error_rate*100:.0f}% (Window {STATE['consecutive_failures']}/{STATE['threshold_required']})")
+                add_log(f"[WARN] Canary error spike: {error_rate*100:.0f}% (Window {STATE['consecutive_failures']}/{STATE['threshold_required']})")
 
                 if STATE["consecutive_failures"] >= STATE["threshold_required"]:
                     # EXECUTE EMERGENCY ROLLBACK
                     STATE["rolled_back"] = True
                     STATE["canary_weight"] = 0
                     STATE["stable_weight"] = 100
-                    add_log("🚨 EMERGENCY AUTO-ROLLBACK TRIGGERED!")
-                    add_log("⚡ Circuit tripped: Traffic diverted 100% to stable (v1.0.0).")
-                    add_log("✅ Zero-downtime failover executed in < 40ms.")
+                    add_log("[CRITICAL] EMERGENCY AUTO-ROLLBACK TRIGGERED!")
+                    add_log("[FAILOVER] Circuit breaker tripped: Traffic diverted 100% to stable (v1.0.0).")
+                    add_log("[SUCCESS] Zero-downtime failover executed in < 40ms.")
             else:
                 if STATE["consecutive_failures"] > 0:
-                    add_log("🟢 Transient spike cleared. Flapping counter reset to 0.")
+                    add_log("[INFO] Transient spike cleared. Flapping counter reset to 0.")
                 STATE["consecutive_failures"] = 0
 
 def start_server(port, handler_class):
@@ -261,7 +268,7 @@ def start_server(port, handler_class):
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("🛡️  ROLLSAFE SRE DEMONSTRATION ENGINE (STANDALONE LOCAL MODE)")
+    print("[ROLLSAFE] SRE DEMONSTRATION ENGINE (STANDALONE LOCAL MODE)")
     print("=" * 70)
     print("Starting microservices...")
 
@@ -271,15 +278,15 @@ if __name__ == "__main__":
     threading.Thread(target=controller_worker, daemon=True).start()
 
     time.sleep(0.5)
-    print("✅ [Port 8081] Stable Microservice (v1.0.0-stable) online")
-    print("✅ [Port 8082] Canary Microservice (v2.0.0-canary) online")
-    print("✅ [Port 8080] RollSafe Gateway & Telemetry Station online")
-    print("✅ [Daemon]    Anomaly & Flapping Controller running")
+    print("[OK] [Port 8081] Stable Microservice (v1.0.0-stable) online")
+    print("[OK] [Port 8082] Canary Microservice (v2.0.0-canary) online")
+    print("[OK] [Port 8080] RollSafe Gateway & Telemetry Station online")
+    print("[OK] [Daemon]    Anomaly & Flapping Controller running")
     print("=" * 70)
-    print("\n👉 OPEN YOUR BROWSER AT:  http://localhost:8080/")
-    print("\n👉 In another terminal, run traffic tests:")
-    print("   Normal: python deploy/scripts/simulate_traffic.py --count 30")
-    print("   Fault:  python deploy/scripts/simulate_traffic.py --inject-fault --count 20")
+    print("\n>>> OPEN YOUR BROWSER AT:  http://localhost:8080/")
+    print("\n>>> In another terminal, run traffic tests:")
+    print("    Normal: python deploy/scripts/simulate_traffic.py --count 30")
+    print("    Fault:  python deploy/scripts/simulate_traffic.py --inject-fault --count 20")
     print("=" * 70)
 
     try:
